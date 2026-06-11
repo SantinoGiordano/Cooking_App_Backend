@@ -1,63 +1,86 @@
-package main 
+package main
 
 import (
 	"context"
-	"time"
+	"net/http"
+	"strconv"
 
 	"github.com/gofiber/fiber/v2"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
 )
 
-var RecipeCollection *mongo.Collection
+func SearchRecipesByIngredient(c *fiber.Ctx) error {
+	ingredient := c.Query("ingredient")
+	cuisine := c.Query("cuisine")
+	difficulty := c.Query("difficulty")
+	timeFilter := c.Query("time")
 
-type IngredientSearchRequest struct {
-	Ingredients []string `json:"ingredients"`
-}
+	collection := db.Collection("recipes")
 
-func SearchRecipesByIngredients(c *fiber.Ctx) error {
-	var req IngredientSearchRequest
+	filter := bson.M{}
 
-	if err := c.BodyParser(&req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid request body",
-		})
+	// Search by ingredient (case-insensitive)
+	if ingredient != "" {
+		filter["ingredients"] = bson.M{
+			"$elemMatch": bson.M{
+				"$regex":   ingredient,
+				"$options": "i",
+			},
+		}
 	}
 
-	if len(req.Ingredients) == 0 {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"success": false,
-			"message": "At least one ingredient is required",
-		})
+	// Cuisine filter
+	if cuisine != "" {
+		filter["cuisine"] = cuisine
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	// Match recipes that contain ANY of the ingredients
-	filter := bson.M{
-		"ingredients": bson.M{
-			"$in": req.Ingredients,
-		},
+	// Difficulty filter
+	if difficulty != "" {
+		diffInt, err := strconv.Atoi(difficulty)
+		if err == nil {
+			filter["difficulty"] = diffInt
+		}
 	}
 
-	cursor, err := RecipeCollection.Find(ctx, filter)
+	// Time filter
+	switch timeFilter {
+	case "short":
+		filter["prepTime"] = bson.M{
+			"$lte": 15,
+		}
+
+	case "medium":
+		filter["prepTime"] = bson.M{
+			"$gte": 20,
+			"$lte": 40,
+		}
+
+	case "long":
+		filter["prepTime"] = bson.M{
+			"$gt": 40,
+		}
+	}
+
+	cursor, err := collection.Find(context.Background(), filter)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"success": false,
-			"message": err.Error(),
+			"error":   err.Error(),
 		})
 	}
-	defer cursor.Close(ctx)
+	defer cursor.Close(context.Background())
 
 	var recipes []Recipe
 
-	if err := cursor.All(ctx, &recipes); err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+	if err := cursor.All(context.Background(), &recipes); err != nil {
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{
 			"success": false,
-			"message": err.Error(),
+			"error":   err.Error(),
 		})
+	}
+
+	if recipes == nil {
+		recipes = []Recipe{}
 	}
 
 	return c.JSON(fiber.Map{
