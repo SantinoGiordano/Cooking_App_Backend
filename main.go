@@ -59,7 +59,7 @@ func main() {
 	}))
 	app.Get("/api/recipes", getAllRecipes)
 	app.Get("/api/recipes/search", SearchRecipes)
-
+	app.Post("/api/recipes/by-ingredients", SearchRecipesByIngredients)
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
